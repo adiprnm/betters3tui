@@ -22,9 +22,24 @@ class S3Browser
     @current_prefix = ""
     @selected_index = 0
     @scroll_offset = 0
-    @mode = :profile_select  # :profile_select, :bucket_select, :object_list
-    @message = nil
-    @message_time = nil
+    @mode = :profile_select  # :profile_select, :bucket_select, :object_list, :add_profile, :edit_profile
+    
+    # Profile creation/edit state
+    @new_profile = {}
+    @profile_fields = [
+      { key: 'name', label: 'Profile Name', required: true },
+      { key: 'endpoint', label: 'Endpoint URL', required: false },
+      { key: 'access_key', label: 'Access Key', required: true },
+      { key: 'secret_key', label: 'Secret Key', required: true, secret: true },
+      { key: 'region', label: 'Region', required: false },
+      { key: 'is_aws', label: 'Is AWS? (y/n)', required: false, boolean: true }
+    ]
+    @current_field_index = 0
+    @editing_profile_index = nil
+    
+    # Delete confirmation state
+    @delete_confirm_mode = false
+    @delete_profile_name = nil
     
     # Search state
     @search_mode = false
@@ -113,6 +128,10 @@ class S3Browser
       case @mode
       when :profile_select
         render_profile_list(screen)
+      when :add_profile
+        render_add_profile(screen)
+      when :edit_profile
+        render_edit_profile(screen)
       when :bucket_select
         render_bucket_list(screen)
       when :object_list
@@ -174,13 +193,127 @@ class S3Browser
 
   def render_profile_list(screen)
     @profiles.each_with_index do |profile, idx|
+      is_selected = idx == @selected_index
       screen.body.add_line(
-        background: idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
+        background: is_selected ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
-        prefix = idx == @selected_index ? "→ " : "  "
+        prefix = is_selected ? "→ " : "  "
         line.write << prefix << profile['name']
-        line.right.write_dim(profile['endpoint'])
+        if is_selected
+          line.right.write(Tui::Text.highlight(" e ") + "edit  " + Tui::Text.accent(" d ") + "delete  " + profile['endpoint'].to_s)
+        else
+          line.right.write_dim(profile['endpoint'])
+        end
       end
+    end
+    
+    # Add "+ Add new profile" option
+    add_idx = @profiles.length
+    screen.body.add_line(
+      background: add_idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
+    ) do |line|
+      prefix = add_idx == @selected_index ? "→ " : "  "
+      line.write << prefix << "+ Add new profile"
+    end
+  end
+  
+  def render_edit_profile(screen)
+    screen.body.add_line do |line|
+      line.write.write_highlight("Edit Profile")
+    end
+    screen.body.add_line
+    
+    @profile_fields.each_with_index do |field, idx|
+      is_current = idx == @current_field_index
+      value = @new_profile[field[:key]] || ""
+      
+      # Mask secret fields
+      display_value = if field[:secret] && !value.empty?
+        "*" * value.length
+      elsif field[:boolean]
+        value == true || value.to_s.downcase == 'y' ? "yes" : (value == false || value.to_s.downcase == 'n' ? "no" : "")
+      else
+        value
+      end
+      
+      screen.body.add_line(
+        background: is_current ? Tui::Palette::SELECTED_BG : nil
+      ) do |line|
+        prefix = is_current ? "→ " : "  "
+        label = "#{field[:label]}:"
+        if field[:required]
+          label = "#{field[:label]}* :"
+        end
+        
+        line.write << prefix << label
+        
+        if is_current
+          # Show cursor for current field
+          cursor_char = display_value.empty? ? "_" : display_value[-1]
+          visible_text = display_value.empty? ? "" : display_value[0..-2]
+          line.write << " " << visible_text << Tui::Text.highlight(cursor_char)
+        else
+          line.write << " " << display_value
+        end
+      end
+    end
+    
+    screen.body.add_line
+    screen.body.add_line do |line|
+      line.write.write_dim("* required field")
+    end
+    screen.body.add_line do |line|
+      line.write.write_dim("Tab/↓ next field  ↑ prev field  Enter save  Esc cancel")
+    end
+  end
+  
+  def render_add_profile(screen)
+    screen.body.add_line do |line|
+      line.write.write_highlight("Create New Profile")
+    end
+    screen.body.add_line
+    
+    @profile_fields.each_with_index do |field, idx|
+      is_current = idx == @current_field_index
+      value = @new_profile[field[:key]] || ""
+      
+      # Mask secret fields
+      display_value = if field[:secret] && !value.empty?
+        "*" * value.length
+      elsif field[:boolean]
+        value == "y" || value == "Y" ? "yes" : (value == "n" || value == "N" ? "no" : "")
+      else
+        value
+      end
+      
+      screen.body.add_line(
+        background: is_current ? Tui::Palette::SELECTED_BG : nil
+      ) do |line|
+        prefix = is_current ? "→ " : "  "
+        label = "#{field[:label]}:"
+        if field[:required]
+          label = "#{field[:label]}* :"
+        end
+        
+        line.write << prefix << label
+        
+        if is_current
+          # Show cursor for current field
+          cursor_char = display_value.empty? ? "_" : display_value[-1]
+          visible_text = display_value.empty? ? "" : display_value[0..-2]
+          line.write << " " << visible_text << Tui::Text.highlight(cursor_char)
+        else
+          line.write << " " << display_value
+        end
+      end
+    end
+    
+    screen.body.add_line
+    screen.body.add_line do |line|
+      line.write.write_dim("* required field")
+    end
+    screen.body.add_line do |line|
+      line.write.write_dim("Tab/↓ next field  ↑ prev field  Enter save  Esc cancel")
     end
   end
 
@@ -233,7 +366,11 @@ class S3Browser
     else
       case @mode
       when :profile_select
-        "↑↓/jk navigate  / search  Enter select  q quit"
+        "↑↓/jk navigate  a add  e edit  d delete  / search  Enter select  q quit"
+      when :add_profile
+        "Tab/↓ next  ↑ prev  Enter save  Esc cancel"
+      when :edit_profile
+        "Tab/↓ next  ↑ prev  Enter save  Esc cancel"
       when :bucket_select
         "↑↓/jk navigate  / search  Enter open  Esc/⌫ back  q quit"
       when :object_list
@@ -245,6 +382,11 @@ class S3Browser
   def handle_input
     char = $stdin.getc
     return unless char
+    
+    if @delete_confirm_mode
+      handle_delete_confirmation(char)
+      return
+    end
     
     if @search_mode
       handle_search_input(char)
@@ -302,29 +444,233 @@ class S3Browser
       if seq
         case seq
         when "[A"  # Up arrow
-          move_selection(-1)
+          if @mode == :add_profile || @mode == :edit_profile
+            move_field(-1)
+          else
+            move_selection(-1)
+          end
         when "[B"  # Down arrow
-          move_selection(1)
+          if @mode == :add_profile || @mode == :edit_profile
+            move_field(1)
+          else
+            move_selection(1)
+          end
         end
       else
         # Just Escape key
-        go_back
+        if @mode == :add_profile || @mode == :edit_profile
+          cancel_profile_form
+        else
+          go_back
+        end
       end
     when "\r", "\n"  # Enter
-      select_current
+      if @mode == :add_profile
+        save_profile
+      elsif @mode == :edit_profile
+        update_profile
+      else
+        select_current
+      end
     when "j"
-      move_selection(1)
+      if @mode != :add_profile && @mode != :edit_profile
+        move_selection(1)
+      else
+        handle_profile_input(char)
+      end
     when "k"
-      move_selection(-1)
-    when "/"
-      enter_search_mode
-    when "\x7F"  # Backspace
-      go_back
+      if @mode != :add_profile && @mode != :edit_profile
+        move_selection(-1)
+      else
+        handle_profile_input(char)
+      end
+    when "a", "A"
+      if @mode == :profile_select
+        start_add_profile
+      elsif @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      end
+    when "e", "E"
+      if @mode == :profile_select && @selected_index < @profiles.length
+        start_edit_profile
+      elsif @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      end
     when "d", "D"
-      download_current if @mode == :object_list
+      if @mode == :profile_select && @selected_index < @profiles.length
+        delete_profile
+      elsif @mode == :object_list
+        download_current
+      elsif @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      end
+    when "\t"  # Tab
+      move_field(1) if @mode == :add_profile || @mode == :edit_profile
+    when "/"
+      if @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      else
+        enter_search_mode
+      end
+    when "\x7F"  # Backspace
+      if @mode == :add_profile || @mode == :edit_profile
+        handle_profile_backspace
+      else
+        go_back
+      end
     when "q", "Q"
-      raise Interrupt
+      if @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      else
+        raise Interrupt
+      end
+    else
+      if (@mode == :add_profile || @mode == :edit_profile) && char =~ /[[:print:]]/
+        handle_profile_input(char)
+      end
     end
+  end
+  
+  def start_add_profile
+    @mode = :add_profile
+    @new_profile = {}
+    @current_field_index = 0
+    @selected_index = 0
+  end
+  
+  def cancel_profile_form
+    @mode = :profile_select
+    @new_profile = {}
+    @current_field_index = 0
+    @editing_profile_index = nil
+  end
+  
+  def move_field(delta)
+    max = @profile_fields.length - 1
+    @current_field_index = [[@current_field_index + delta, 0].max, max].min
+  end
+  
+  def handle_profile_input(char)
+    field = @profile_fields[@current_field_index]
+    key = field[:key]
+    
+    if field[:boolean]
+      # Only allow y/n for boolean fields
+      if char.downcase == 'y' || char.downcase == 'n'
+        @new_profile[key] = char.downcase
+      end
+    else
+      current = @new_profile[key] || ""
+      @new_profile[key] = current + char
+    end
+  end
+  
+  def handle_profile_backspace
+    field = @profile_fields[@current_field_index]
+    key = field[:key]
+    current = @new_profile[key] || ""
+    if current.length > 0
+      @new_profile[key] = current[0...-1]
+    end
+  end
+  
+  def save_profile
+    # Validate required fields
+    required_fields = @profile_fields.select { |f| f[:required] }
+    missing = required_fields.select { |f| @new_profile[f[:key]].nil? || @new_profile[f[:key]].empty? }
+    
+    if missing.any?
+      show_message("Error: #{missing.map { |f| f[:label] }.join(', ')} required")
+      return
+    end
+    
+    # Convert boolean field
+    if @new_profile['is_aws']
+      @new_profile['is_aws'] = @new_profile['is_aws'].downcase == 'y'
+    end
+    
+    # Set default region if not provided
+    @new_profile['region'] ||= 'us-east-1'
+    
+    # Save to file
+    @profiles << @new_profile
+    save_profiles_to_file
+    
+    @mode = :profile_select
+    @new_profile = {}
+    @current_field_index = 0
+    @selected_index = @profiles.length - 1
+    show_message("Profile created successfully!")
+  end
+  
+  def start_edit_profile
+    return if @selected_index >= @profiles.length
+    
+    @editing_profile_index = @selected_index
+    @new_profile = @profiles[@selected_index].dup
+    @mode = :edit_profile
+    @current_field_index = 0
+  end
+  
+  def update_profile
+    return unless @editing_profile_index
+    
+    # Validate required fields
+    required_fields = @profile_fields.select { |f| f[:required] }
+    missing = required_fields.select { |f| @new_profile[f[:key]].nil? || @new_profile[f[:key]].empty? }
+    
+    if missing.any?
+      show_message("Error: #{missing.map { |f| f[:label] }.join(', ')} required")
+      return
+    end
+    
+    # Convert boolean field
+    if @new_profile['is_aws']
+      @new_profile['is_aws'] = @new_profile['is_aws'].downcase == 'y'
+    end
+    
+    # Set default region if not provided
+    @new_profile['region'] ||= 'us-east-1'
+    
+    # Update profile
+    @profiles[@editing_profile_index] = @new_profile
+    save_profiles_to_file
+    
+    @mode = :profile_select
+    @new_profile = {}
+    @current_field_index = 0
+    @editing_profile_index = nil
+    show_message("Profile updated successfully!")
+  end
+  
+  def delete_profile
+    return if @selected_index >= @profiles.length
+    
+    @delete_confirm_mode = true
+    @delete_profile_name = @profiles[@selected_index]['name']
+    show_message("Delete profile '#{@delete_profile_name}'? Press 'y' to confirm, any key to cancel")
+  end
+
+  def handle_delete_confirmation(char)
+    if char.downcase == 'y'
+      # Actually delete
+      @profiles.delete_at(@selected_index)
+      save_profiles_to_file
+      @selected_index = [@selected_index, @profiles.length - 1].min
+      show_message("Profile '#{@delete_profile_name}' deleted!")
+    else
+      show_message("Delete cancelled")
+    end
+    @delete_confirm_mode = false
+    @delete_profile_name = nil
+  end
+
+  def save_profiles_to_file
+    require 'fileutils'
+    config_dir = File.dirname(PROFILES_PATH)
+    FileUtils.mkdir_p(config_dir) unless File.exist?(config_dir)
+    
+    File.write(PROFILES_PATH, JSON.pretty_generate(@profiles))
   end
 
   def enter_search_mode
@@ -432,13 +778,15 @@ class S3Browser
     else
       case @mode
       when :profile_select
-        @profiles.length - 1
+        @profiles.length  # +1 for "Add new profile" option
       when :bucket_select
         @buckets.length - 1
       when :object_list
         max = @objects.length
         max += 1 if !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
         max
+      else
+        return  # Don't move selection in other modes (add_profile, edit_profile)
       end
     end
     
@@ -448,12 +796,24 @@ class S3Browser
   def select_current
     case @mode
     when :profile_select
-      @current_profile = @profiles[@selected_index]
-      @selected_index = 0
-      connect_to_s3
-      @mode = :bucket_select
-      list_buckets
+      if @selected_index == @profiles.length
+        # Selected "Add new profile"
+        start_add_profile
+      else
+        @current_profile = @profiles[@selected_index]
+        @selected_index = 0
+        connect_to_s3
+        @mode = :bucket_select
+        list_buckets
+      end
     when :bucket_select
+      if @buckets[@selected_index].nil?
+        @mode = :profile_select
+        @current_profile = nil
+        @s3_client = nil
+        @selected_index = 0
+        return
+      end
       @current_bucket = @buckets[@selected_index].name
       @selected_index = 0
       @current_prefix = ""
