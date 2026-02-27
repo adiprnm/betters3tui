@@ -1150,8 +1150,8 @@ class S3Browser
       return time.strftime("%Y-%m-%d %H:%M")
     end
     
-    # Calculate relative time
-    if diff < 60
+    # Calculate relative time and pad to align with date format (16 chars)
+    result = if diff < 60
       # Less than a minute
       "#{diff.to_i}s ago"
     elsif diff < 60 * 60
@@ -1167,6 +1167,9 @@ class S3Browser
       days = (diff / (24 * 60 * 60)).to_i
       "#{days}d ago"
     end
+    
+    # Right-align to match date format width (16 characters)
+    result.rjust(16)
   end
 end
 
