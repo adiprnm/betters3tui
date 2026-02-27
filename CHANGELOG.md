@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-02-27
+
+### Added
+- **Download progress bar** - Visual progress indicator when downloading files with percentage, file size, and completion status
+- **Loading indicators** - Show "Loading buckets..." and "Loading directory contents..." when fetching data from S3
+
+### Fixed
+- **Ruby compatibility** - Fixed `Data.define` error for Ruby versions < 3.2 by using `Struct` instead
+
 ## [0.1.1] - 2026-02-27
 
 ### Added
@@ -25,5 +34,6 @@ All notable changes to this project will be documented in this file.
 - File download capability
 - Interactive keyboard navigation
 
+[0.2.6]: https://github.com/adiprnm/betters3tui/compare/v0.2.5...v0.2.6
 [0.1.1]: https://github.com/adiprnm/betters3tui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/adiprnm/betters3tui/releases/tag/v0.1.0
