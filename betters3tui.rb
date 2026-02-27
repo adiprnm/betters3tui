@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+VERSION = "0.1.1"
+
 require "json"
 require "aws-sdk-s3"
 require_relative "lib/tui"
