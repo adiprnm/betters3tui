@@ -25,7 +25,20 @@ ruby betters3tui.rb
 
 ### Option 2: Docker (Recommended)
 
-Build and run using Docker Compose:
+**Run from GitHub Container Registry (Pre-built):**
+
+```bash
+# Pull and run latest version
+docker run -it \
+  -v ~/.config/betters3tui:/root/.config/betters3tui \
+  -v ~/Downloads:/root/Downloads \
+  ghcr.io/adiprnm/betters3tui:latest
+
+# Or pull specific version
+docker pull ghcr.io/adiprnm/betters3tui:v0.2.2
+```
+
+**Build locally using Docker Compose:**
 
 ```bash
 # Clone the repository
@@ -39,7 +52,7 @@ docker-compose build
 docker-compose run betters3tui
 ```
 
-Or using Docker directly:
+**Build locally using Docker:**
 
 ```bash
 # Build the image
