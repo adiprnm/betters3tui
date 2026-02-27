@@ -3,3 +3,10 @@
 source "https://rubygems.org"
 
 gem "aws-sdk-s3", "~> 1.0"
+
+group :test do
+  gem "minitest", "~> 5.0", "!= 6.0.0"
+  gem "minitest-reporters", "~> 1.0"
+end
+
+gem "rake", "~> 13.0"

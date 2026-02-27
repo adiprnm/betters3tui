@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+
+services:
+  betters3tui:
+    build: .
+    stdin_open: true
+    tty: true
+    volumes:
+      - ~/.config/betters3tui:/root/.config/betters3tui
+      - ~/Downloads:/root/Downloads

@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 require "json"
 require "aws-sdk-s3"
-require_relative "lib/tui"
-require_relative "lib/fuzzy"
+require_relative "tui"
+require_relative "fuzzy"
 
 PROFILES_PATH = File.expand_path("~/.config/betters3tui/profiles.json")
 DOWNLOADS_PATH = File.expand_path("~/Downloads")
@@ -105,7 +105,7 @@ class S3Browser
     print Tui::ANSI::ALT_SCREEN_OFF
     print Tui::ANSI::SHOW
     print Tui::ANSI::RESET
-    system("stty #{@original_stty} 2>/dev/null") unless @original_stty.empty?
+    system("stty #{@original_stty} 2>/dev/null") if @original_stty && !@original_stty.empty?
     $stdout.flush
   end
 
