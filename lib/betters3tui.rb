@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 
 require "json"
 require "aws-sdk-s3"
@@ -69,12 +69,7 @@ class S3Browser
   end
 
   def run
-    if @profiles.empty?
-      puts "No profiles found at #{PROFILES_PATH}"
-      puts "Please create a profiles.json file with your S3 credentials."
-      exit 1
-    end
-
+    ensure_profiles_file_exists
     setup_terminal
 
     loop do
@@ -95,6 +90,16 @@ class S3Browser
     JSON.parse(File.read(PROFILES_PATH))
   rescue JSON::ParserError
     []
+  end
+
+  def ensure_profiles_file_exists
+    require 'fileutils'
+    config_dir = File.dirname(PROFILES_PATH)
+    FileUtils.mkdir_p(config_dir) unless File.exist?(config_dir)
+
+    unless File.exist?(PROFILES_PATH)
+      File.write(PROFILES_PATH, JSON.pretty_generate([]))
+    end
   end
 
   def setup_terminal
