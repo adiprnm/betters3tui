@@ -1141,7 +1141,32 @@ class S3Browser
 
   def format_time(time)
     return "-" if time.nil?
-    time.strftime("%Y-%m-%d %H:%M")
+    
+    now = Time.now
+    diff = now - time
+    
+    # If more than 2 weeks ago, show formatted date
+    if diff > 14 * 24 * 60 * 60  # 14 days in seconds
+      return time.strftime("%Y-%m-%d %H:%M")
+    end
+    
+    # Calculate relative time
+    if diff < 60
+      # Less than a minute
+      "#{diff.to_i}s ago"
+    elsif diff < 60 * 60
+      # Less than an hour
+      minutes = (diff / 60).to_i
+      "#{minutes}m ago"
+    elsif diff < 24 * 60 * 60
+      # Less than a day
+      hours = (diff / (60 * 60)).to_i
+      "#{hours}h ago"
+    else
+      # Days
+      days = (diff / (24 * 60 * 60)).to_i
+      "#{days}d ago"
+    end
   end
 end
 
