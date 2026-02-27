@@ -55,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Required for OIDC
 
     steps:
       - name: Checkout repository
@@ -66,17 +67,7 @@ jobs:
           ruby-version: '3.4'
           bundler-cache: true
 
-      - name: Build gem
-        run: gem build betters3tui.gemspec
-
-      - name: Push to RubyGems
-        env:
-          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: |
-          mkdir -p ~/.gem
-          cat << EOF > ~/.gem/credentials
-          ---
-          :rubygems_api_key: ${RUBYGEMS_API_KEY}
-          EOF
-          chmod 0600 ~/.gem/credentials
-          gem push betters3tui-*.gem
+      - name: Publish to RubyGems
+        uses: rubygems/release-gem@v1
+        with:
+          await-approval: false
