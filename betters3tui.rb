@@ -145,6 +145,7 @@ class S3Browser
     screen.footer.divider
     screen.footer.add_line do |line|
       line.write.write_dim(footer_text)
+      line.right.write_dim(node_count_text)
     end
 
     if @message && Time.now - @message_time < 3
@@ -403,6 +404,26 @@ class S3Browser
         "↑↓/jk navigate  / search  Enter open/download  Esc/⌫ back  d download  q quit"
       end
     end
+  end
+
+  def node_count_text
+    # Get current item count based on mode
+    total_items = case @mode
+    when :profile_select
+      @profiles.length + 1  # +1 for "Add new profile"
+    when :bucket_select
+      @buckets.length
+    when :object_list
+      has_parent = !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
+      @objects.length + (has_parent ? 1 : 0)  # +1 for ".."
+    else
+      0
+    end
+    
+    # Current node is selected_index + 1 (1-based)
+    current_node = @selected_index + 1
+    
+    total_items > 0 ? "#{current_node}/#{total_items}" : "0/0"
   end
 
   def handle_input
