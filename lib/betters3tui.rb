@@ -62,6 +62,10 @@ class S3Browser
       { key: 'd', label: 'Date', value: :date }
     ]
     @sort_menu_index = 0
+
+    # Loading state
+    @loading = false
+    @loading_message = ""
   end
 
   def run
@@ -172,7 +176,23 @@ class S3Browser
       line.right.write_dim(node_count_text)
     end
 
-    if @message && Time.now - @message_time < 3
+    if @loading
+      screen.footer.add_line do |line|
+        line.write << Tui::Text.highlight(@loading_message)
+      end
+    elsif @downloading && @download_progress
+      progress = @download_progress
+      percent = (progress[:downloaded].to_f / progress[:total] * 100).round(1)
+      bar_width = 20
+      filled = (percent / 100 * bar_width).to_i
+      bar = "█" * filled + "░" * (bar_width - filled)
+      downloaded_str = format_size(progress[:downloaded])
+      total_str = format_size(progress[:total])
+      progress_msg = "Downloading #{progress[:filename]}: [#{bar}] #{percent}% (#{downloaded_str}/#{total_str})"
+      screen.footer.add_line do |line|
+        line.write << Tui::Text.highlight(progress_msg)
+      end
+    elsif @message && Time.now - @message_time < 3
       screen.footer.add_line do |line|
         line.write << (@message.include?("Error") ? Tui::Text.accent(@message) : Tui::Text.highlight(@message))
       end
@@ -1164,15 +1184,26 @@ class S3Browser
   def list_buckets
     return unless @s3_client
 
+    @loading = true
+    @loading_message = "Loading buckets..."
+    render
+
     response = @s3_client.list_buckets
     @buckets = response.buckets
   rescue => e
     show_message("Error listing buckets: #{e.message}")
     @buckets = []
+  ensure
+    @loading = false
   end
 
   def list_objects
     return unless @s3_client && @current_bucket
+
+    # Show loading indicator
+    @loading = true
+    @loading_message = "Loading directory contents..."
+    render
 
     delimiter = "/"
     response = @s3_client.list_objects_v2(
@@ -1203,6 +1234,8 @@ class S3Browser
   rescue => e
     show_message("Error listing objects: #{e.message}")
     @objects = []
+  ensure
+    @loading = false
   end
 
   def download_current
@@ -1234,16 +1267,54 @@ class S3Browser
       counter += 1
     end
 
+    @downloading = true
     begin
-      @s3_client.get_object(
-        response_target: download_path,
+      # Get file size first
+      head_response = @s3_client.head_object(
         bucket: @current_bucket,
         key: key
       )
+      total_size = head_response.content_length
+
+      # Download with progress
+      downloaded = 0
+      File.open(download_path, 'wb') do |file|
+        @s3_client.get_object(
+          bucket: @current_bucket,
+          key: key
+        ) do |chunk|
+          file.write(chunk)
+          downloaded += chunk.bytesize
+          @download_progress = {
+            filename: filename,
+            downloaded: downloaded,
+            total: total_size
+          }
+          render
+        end
+      end
       show_message("Downloaded: #{filename}")
     rescue => e
       show_message("Error downloading: #{e.message}")
+    ensure
+      @downloading = false
+      @download_progress = nil
     end
+  end
+
+  def show_download_progress(filename, downloaded, total)
+    return if total.nil? || total == 0
+
+    percent = (downloaded.to_f / total * 100).round(1)
+    bar_width = 20
+    filled = (percent / 100 * bar_width).to_i
+    bar = "█" * filled + "░" * (bar_width - filled)
+
+    downloaded_str = format_size(downloaded)
+    total_str = format_size(total)
+
+    @message = "Downloading #{filename}: [#{bar}] #{percent}% (#{downloaded_str}/#{total_str})"
+    @message_time = Time.now
   end
 
   def show_message(msg)
