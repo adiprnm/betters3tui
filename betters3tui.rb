@@ -12,6 +12,8 @@ DOWNLOADS_PATH = File.expand_path("~/Downloads")
 class S3Browser
   include Tui::Helpers
 
+  NODE_HEIGHT = 4
+
   def initialize
     @profiles = load_profiles
     @current_profile = nil
@@ -23,7 +25,7 @@ class S3Browser
     @selected_index = 0
     @scroll_offset = 0
     @mode = :profile_select  # :profile_select, :bucket_select, :object_list, :add_profile, :edit_profile
-    
+
     # Profile creation/edit state
     @new_profile = {}
     @profile_fields = [
@@ -36,11 +38,11 @@ class S3Browser
     ]
     @current_field_index = 0
     @editing_profile_index = nil
-    
+
     # Delete confirmation state
     @delete_confirm_mode = false
     @delete_profile_name = nil
-    
+
     # Search state
     @search_mode = false
     @search_query = String.new
@@ -56,7 +58,7 @@ class S3Browser
     end
 
     setup_terminal
-    
+
     loop do
       render
       handle_input
@@ -95,20 +97,20 @@ class S3Browser
 
   def render
     screen = Tui::Screen.new
-    
+
     # Header
     screen.header.add_line do |line|
       line.write << bold("📁 BetterS3TUI")
       line.right.write_dim("Profile: #{@current_profile ? @current_profile['name'] : 'None'}")
     end
-    
+
     if @current_profile && @current_bucket
       screen.header.add_line do |line|
         line.write.write_dim("Bucket: ") << @current_bucket
         line.right.write_dim("Prefix: #{@current_prefix.empty? ? '/' : @current_prefix}")
       end
     end
-    
+
     # Search input line when in search mode
     if @search_mode
       screen.header.add_line do |line|
@@ -118,9 +120,9 @@ class S3Browser
         line.mark_has_input("Search: ".length)
       end
     end
-    
+
     screen.header.divider
-    
+
     # Body content based on mode
     if @search_mode && @search_results.any?
       render_search_results(screen)
@@ -138,24 +140,29 @@ class S3Browser
         render_object_list(screen)
       end
     end
-    
+
     # Footer
     screen.footer.divider
     screen.footer.add_line do |line|
       line.write.write_dim(footer_text)
     end
-    
+
     if @message && Time.now - @message_time < 3
       screen.footer.add_line do |line|
         line.write << (@message.include?("Error") ? Tui::Text.accent(@message) : Tui::Text.highlight(@message))
       end
     end
-    
+
     screen.flush
   end
 
   def render_search_results(screen)
+    max_nodes = calculate_max_nodes
+
     @search_results.each_with_index do |result, idx|
+      next if idx < @scroll_offset
+      next if idx >= @scroll_offset + max_nodes
+
       screen.body.add_line(
         background: idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
@@ -163,10 +170,10 @@ class S3Browser
         entry = result[:entry]
         positions = result[:positions]
         text = result[:text]
-        
+
         # Highlight matching characters
         highlighted = highlight_matches(text, positions)
-        
+
         if entry[:type] == :directory
           line.write << prefix << emoji("📂") << " " << highlighted
         else
@@ -179,7 +186,7 @@ class S3Browser
 
   def highlight_matches(text, positions)
     return text if positions.nil? || positions.empty?
-    
+
     result = String.new
     text.chars.each_with_index do |char, idx|
       if positions.include?(idx)
@@ -192,7 +199,12 @@ class S3Browser
   end
 
   def render_profile_list(screen)
+    max_nodes = calculate_max_nodes
+
     @profiles.each_with_index do |profile, idx|
+      next if idx < @scroll_offset
+      next if idx >= @scroll_offset + max_nodes
+
       is_selected = idx == @selected_index
       screen.body.add_line(
         background: is_selected ? Tui::Palette::SELECTED_BG : nil
@@ -206,27 +218,29 @@ class S3Browser
         end
       end
     end
-    
+
     # Add "+ Add new profile" option
     add_idx = @profiles.length
-    screen.body.add_line(
-      background: add_idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
-    ) do |line|
-      prefix = add_idx == @selected_index ? "→ " : "  "
-      line.write << prefix << "+ Add new profile"
+    if add_idx >= @scroll_offset && add_idx < @scroll_offset + max_nodes
+      screen.body.add_line(
+        background: add_idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
+      ) do |line|
+        prefix = add_idx == @selected_index ? "→ " : "  "
+        line.write << prefix << "+ Add new profile"
+      end
     end
   end
-  
+
   def render_edit_profile(screen)
     screen.body.add_line do |line|
       line.write.write_highlight("Edit Profile")
     end
     screen.body.add_line
-    
+
     @profile_fields.each_with_index do |field, idx|
       is_current = idx == @current_field_index
       value = @new_profile[field[:key]] || ""
-      
+
       # Mask secret fields
       display_value = if field[:secret] && !value.empty?
         "*" * value.length
@@ -235,7 +249,7 @@ class S3Browser
       else
         value
       end
-      
+
       screen.body.add_line(
         background: is_current ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
@@ -244,9 +258,9 @@ class S3Browser
         if field[:required]
           label = "#{field[:label]}* :"
         end
-        
+
         line.write << prefix << label
-        
+
         if is_current
           # Show cursor for current field
           cursor_char = display_value.empty? ? "_" : display_value[-1]
@@ -257,7 +271,7 @@ class S3Browser
         end
       end
     end
-    
+
     screen.body.add_line
     screen.body.add_line do |line|
       line.write.write_dim("* required field")
@@ -266,17 +280,17 @@ class S3Browser
       line.write.write_dim("Tab/↓ next field  ↑ prev field  Enter save  Esc cancel")
     end
   end
-  
+
   def render_add_profile(screen)
     screen.body.add_line do |line|
       line.write.write_highlight("Create New Profile")
     end
     screen.body.add_line
-    
+
     @profile_fields.each_with_index do |field, idx|
       is_current = idx == @current_field_index
       value = @new_profile[field[:key]] || ""
-      
+
       # Mask secret fields
       display_value = if field[:secret] && !value.empty?
         "*" * value.length
@@ -285,7 +299,7 @@ class S3Browser
       else
         value
       end
-      
+
       screen.body.add_line(
         background: is_current ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
@@ -294,9 +308,9 @@ class S3Browser
         if field[:required]
           label = "#{field[:label]}* :"
         end
-        
+
         line.write << prefix << label
-        
+
         if is_current
           # Show cursor for current field
           cursor_char = display_value.empty? ? "_" : display_value[-1]
@@ -307,7 +321,7 @@ class S3Browser
         end
       end
     end
-    
+
     screen.body.add_line
     screen.body.add_line do |line|
       line.write.write_dim("* required field")
@@ -318,7 +332,12 @@ class S3Browser
   end
 
   def render_bucket_list(screen)
+    max_nodes = calculate_max_nodes
+
     @buckets.each_with_index do |bucket, idx|
+      next if idx < @scroll_offset
+      next if idx >= @scroll_offset + max_nodes
+
       screen.body.add_line(
         background: idx == @selected_index ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
@@ -329,8 +348,14 @@ class S3Browser
   end
 
   def render_object_list(screen)
-    # Add ".." for navigation up
-    if !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
+    max_nodes = calculate_max_nodes
+
+    # Calculate total items and start index
+    has_parent = !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
+    start_idx = has_parent ? 1 : 0
+
+    # Add ".." for navigation up (only visible when not scrolled)
+    if has_parent && @scroll_offset == 0
       screen.body.add_line(
         background: @selected_index == 0 ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
@@ -338,18 +363,19 @@ class S3Browser
         line.write << prefix << emoji("📂") << " .."
       end
     end
-    
-    start_idx = @current_prefix.empty? && !@objects.any? { |obj| obj.key.include?("/") } ? 0 : 1
-    
+
     @objects.each_with_index do |obj, idx|
       actual_idx = idx + start_idx
+      next if actual_idx < @scroll_offset
+      next if actual_idx >= @scroll_offset + max_nodes
+
       is_selected = actual_idx == @selected_index
-      
+
       screen.body.add_line(
         background: is_selected ? Tui::Palette::SELECTED_BG : nil
       ) do |line|
         prefix = is_selected ? "→ " : "  "
-        
+
         if obj.key.end_with?("/")
           line.write << prefix << emoji("📂") << " " << File.basename(obj.key)
         else
@@ -382,12 +408,12 @@ class S3Browser
   def handle_input
     char = $stdin.getc
     return unless char
-    
+
     if @delete_confirm_mode
       handle_delete_confirmation(char)
       return
     end
-    
+
     if @search_mode
       handle_search_input(char)
     else
@@ -403,6 +429,7 @@ class S3Browser
       @search_query = String.new
       @search_results = []
       @selected_index = 0
+      @scroll_offset = 0
     when "\r", "\n"  # Enter
       select_search_result
     when "\x7F"  # Backspace
@@ -416,6 +443,7 @@ class S3Browser
       @search_query = String.new
       @search_results = []
       @selected_index = 0
+      @scroll_offset = 0
     when "\e[A"  # Up arrow (from raw mode)
       move_selection(-1)
     when "\e[B"  # Down arrow (from raw mode)
@@ -440,7 +468,7 @@ class S3Browser
       rescue
         # Ignore errors
       end
-      
+
       if seq
         case seq
         when "[A"  # Up arrow
@@ -530,30 +558,31 @@ class S3Browser
       end
     end
   end
-  
+
   def start_add_profile
     @mode = :add_profile
     @new_profile = {}
     @current_field_index = 0
     @selected_index = 0
   end
-  
+
   def cancel_profile_form
     @mode = :profile_select
     @new_profile = {}
+    @scroll_offset = 0
     @current_field_index = 0
     @editing_profile_index = nil
   end
-  
+
   def move_field(delta)
     max = @profile_fields.length - 1
     @current_field_index = [[@current_field_index + delta, 0].max, max].min
   end
-  
+
   def handle_profile_input(char)
     field = @profile_fields[@current_field_index]
     key = field[:key]
-    
+
     if field[:boolean]
       # Only allow y/n for boolean fields
       if char.downcase == 'y' || char.downcase == 'n'
@@ -564,7 +593,7 @@ class S3Browser
       @new_profile[key] = current + char
     end
   end
-  
+
   def handle_profile_backspace
     field = @profile_fields[@current_field_index]
     key = field[:key]
@@ -573,79 +602,80 @@ class S3Browser
       @new_profile[key] = current[0...-1]
     end
   end
-  
+
   def save_profile
     # Validate required fields
     required_fields = @profile_fields.select { |f| f[:required] }
     missing = required_fields.select { |f| @new_profile[f[:key]].nil? || @new_profile[f[:key]].empty? }
-    
+
     if missing.any?
       show_message("Error: #{missing.map { |f| f[:label] }.join(', ')} required")
       return
     end
-    
+
     # Convert boolean field
     if @new_profile['is_aws']
       @new_profile['is_aws'] = @new_profile['is_aws'].downcase == 'y'
     end
-    
+
     # Set default region if not provided
     @new_profile['region'] ||= 'us-east-1'
-    
+
     # Save to file
     @profiles << @new_profile
     save_profiles_to_file
-    
+
     @mode = :profile_select
     @new_profile = {}
     @current_field_index = 0
     @selected_index = @profiles.length - 1
     show_message("Profile created successfully!")
   end
-  
+
   def start_edit_profile
     return if @selected_index >= @profiles.length
-    
+
     @editing_profile_index = @selected_index
     @new_profile = @profiles[@selected_index].dup
     @mode = :edit_profile
     @current_field_index = 0
   end
-  
+
   def update_profile
     return unless @editing_profile_index
-    
+
     # Validate required fields
     required_fields = @profile_fields.select { |f| f[:required] }
     missing = required_fields.select { |f| @new_profile[f[:key]].nil? || @new_profile[f[:key]].empty? }
-    
+
     if missing.any?
       show_message("Error: #{missing.map { |f| f[:label] }.join(', ')} required")
       return
     end
-    
+
     # Convert boolean field
     if @new_profile['is_aws']
       @new_profile['is_aws'] = @new_profile['is_aws'].downcase == 'y'
     end
-    
+
     # Set default region if not provided
     @new_profile['region'] ||= 'us-east-1'
-    
+
     # Update profile
     @profiles[@editing_profile_index] = @new_profile
     save_profiles_to_file
-    
+
     @mode = :profile_select
     @new_profile = {}
     @current_field_index = 0
     @editing_profile_index = nil
+    @scroll_offset = 0
     show_message("Profile updated successfully!")
   end
-  
+
   def delete_profile
     return if @selected_index >= @profiles.length
-    
+
     @delete_confirm_mode = true
     @delete_profile_name = @profiles[@selected_index]['name']
     show_message("Delete profile '#{@delete_profile_name}'? Press 'y' to confirm, any key to cancel")
@@ -669,7 +699,7 @@ class S3Browser
     require 'fileutils'
     config_dir = File.dirname(PROFILES_PATH)
     FileUtils.mkdir_p(config_dir) unless File.exist?(config_dir)
-    
+
     File.write(PROFILES_PATH, JSON.pretty_generate(@profiles))
   end
 
@@ -679,7 +709,8 @@ class S3Browser
     @search_cursor = 0
     @search_results = []
     @selected_index = 0
-    
+    @scroll_offset = 0
+
     # Pre-populate searchable items based on current mode
     case @mode
     when :profile_select
@@ -694,15 +725,15 @@ class S3Browser
       @searchable_items = @objects.map.with_index do |obj, idx|
         is_dir = obj.key.end_with?("/")
         text = is_dir ? File.basename(obj.key) : File.basename(obj.key)
-        { 
-          text: text, 
-          data: { 
-            type: is_dir ? :directory : :file, 
-            index: idx, 
+        {
+          text: text,
+          data: {
+            type: is_dir ? :directory : :file,
+            index: idx,
             obj: obj,
             size: obj.size,
             last_modified: obj.last_modified
-          } 
+          }
         }
       end
     end
@@ -714,10 +745,10 @@ class S3Browser
       @selected_index = 0
       return
     end
-    
+
     fuzzy = Fuzzy.new(@searchable_items)
     @search_results = []
-    
+
     fuzzy.match(@search_query).each do |entry, positions, score|
       @search_results << {
         entry: entry[:data],
@@ -726,16 +757,17 @@ class S3Browser
         score: score
       }
     end
-    
+
     @selected_index = 0
+    @scroll_offset = 0
   end
 
   def select_search_result
     return unless @search_results[@selected_index]
-    
+
     result = @search_results[@selected_index]
     data = result[:entry]
-    
+
     case data[:type]
     when :profile
       @search_mode = false
@@ -743,6 +775,7 @@ class S3Browser
       @search_results = []
       @current_profile = data[:profile]
       @selected_index = 0
+      @scroll_offset = 0
       connect_to_s3
       @mode = :bucket_select
       list_buckets
@@ -752,6 +785,7 @@ class S3Browser
       @search_results = []
       @current_bucket = data[:bucket].name
       @selected_index = 0
+      @scroll_offset = 0
       @current_prefix = ""
       @mode = :object_list
       list_objects
@@ -763,6 +797,7 @@ class S3Browser
       @current_prefix = obj.key
       list_objects
       @selected_index = 0
+      @scroll_offset = 0
     when :file
       @search_mode = false
       @search_query = String.new
@@ -782,15 +817,70 @@ class S3Browser
       when :bucket_select
         @buckets.length - 1
       when :object_list
-        max = @objects.length
+        max = @objects.length - 1
         max += 1 if !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
         max
       else
         return  # Don't move selection in other modes (add_profile, edit_profile)
       end
     end
-    
-    @selected_index = [[@selected_index + delta, 0].max, max].min
+
+    new_index = @selected_index + delta
+
+    # Clamp to valid range
+    if new_index < 0
+      @selected_index = 0
+      @scroll_offset = 0
+    elsif new_index > max
+      @selected_index = max
+    else
+      @selected_index = new_index
+    end
+
+    # Update scroll offset to keep selection visible
+    update_scroll_for_selection
+  end
+
+  def update_scroll_for_selection
+    max_nodes = calculate_max_nodes
+
+    if @selected_index < @scroll_offset
+      # Selection is above visible area
+      @scroll_offset = @selected_index
+    elsif @selected_index >= @scroll_offset + max_nodes
+      # Selection is below visible area
+      @scroll_offset = @selected_index - max_nodes + 1
+    end
+
+    # Clamp selected_index to stay within visible range
+    # When cursor reaches max node, it stays at the last visible position
+    @selected_index = [@selected_index, @scroll_offset + max_nodes - 1].min
+  end
+
+  def calculate_max_nodes
+    # Get terminal height (rows)
+    term_height, _ = Tui::Terminal.size
+
+    # Ensure minimum terminal height
+    min_terminal_height = 10
+    term_height = [term_height, min_terminal_height].max
+
+    # Count header lines that will be rendered
+    header_lines = 1  # Title line
+    header_lines += 1 if @current_profile && @current_bucket  # Bucket info
+    header_lines += 1 if @search_mode  # Search input
+    header_lines += 1  # Divider
+
+    # Count footer lines that will be rendered
+    footer_lines = 2  # Divider + footer text
+    footer_lines += 1 if @message && Time.now - @message_time < 3
+
+    # Calculate available lines for body content
+    # Each item takes 1 line, so max_nodes = available lines
+    available_lines = term_height - header_lines - footer_lines
+
+    # Ensure at least some space for content (minimum 5 lines)
+    [available_lines, 5].max
   end
 
   def select_current
@@ -799,9 +889,11 @@ class S3Browser
       if @selected_index == @profiles.length
         # Selected "Add new profile"
         start_add_profile
+        @scroll_offset = 0
       else
         @current_profile = @profiles[@selected_index]
         @selected_index = 0
+        @scroll_offset = 0
         connect_to_s3
         @mode = :bucket_select
         list_buckets
@@ -812,10 +904,12 @@ class S3Browser
         @current_profile = nil
         @s3_client = nil
         @selected_index = 0
+        @scroll_offset = 0
         return
       end
       @current_bucket = @buckets[@selected_index].name
       @selected_index = 0
+      @scroll_offset = 0
       @current_prefix = ""
       @mode = :object_list
       list_objects
@@ -826,31 +920,34 @@ class S3Browser
 
   def handle_object_select
     start_idx = @current_prefix.empty? && !@objects.any? { |obj| obj.key.include?("/") } ? 0 : 1
-    
+
     if @selected_index == 0 && start_idx == 1
       # Navigate up
       if @current_prefix.empty?
         @mode = :bucket_select
         @current_bucket = nil
         @selected_index = 0
+        @scroll_offset = 0
       else
         parts = @current_prefix.split("/").reject(&:empty?)
         parts.pop
         @current_prefix = parts.empty? ? "" : parts.join("/") + "/"
         list_objects
         @selected_index = 0
+        @scroll_offset = 0
       end
       return
     end
-    
+
     obj_idx = @selected_index - start_idx
     obj = @objects[obj_idx]
     return unless obj
-    
+
     if obj.key.end_with?("/")
       @current_prefix = obj.key
       list_objects
       @selected_index = 0
+      @scroll_offset = 0
     else
       download_file(obj.key)
     end
@@ -864,24 +961,27 @@ class S3Browser
       @selected_index = 0
       return
     end
-    
+
     case @mode
     when :bucket_select
       @current_profile = nil
       @s3_client = nil
       @mode = :profile_select
       @selected_index = 0
+      @scroll_offset = 0
     when :object_list
       if @current_prefix.empty?
         @current_bucket = nil
         @mode = :bucket_select
         @selected_index = 0
+        @scroll_offset = 0
       else
         parts = @current_prefix.split("/").reject(&:empty?)
         parts.pop
         @current_prefix = parts.empty? ? "" : parts.join("/") + "/"
         list_objects
         @selected_index = 0
+        @scroll_offset = 0
       end
     end
   end
@@ -891,17 +991,17 @@ class S3Browser
       @current_profile['access_key'],
       @current_profile['secret_key']
     )
-    
+
     client_options = {
       credentials: credentials,
       region: @current_profile['region'] || 'us-east-1'
     }
-    
+
     if @current_profile['endpoint']
       client_options[:endpoint] = @current_profile['endpoint']
       client_options[:force_path_style] = true unless @current_profile['is_aws']
     end
-    
+
     @s3_client = Aws::S3::Client.new(client_options)
   rescue => e
     show_message("Error connecting: #{e.message}")
@@ -909,7 +1009,7 @@ class S3Browser
 
   def list_buckets
     return unless @s3_client
-    
+
     response = @s3_client.list_buckets
     @buckets = response.buckets
   rescue => e
@@ -919,16 +1019,16 @@ class S3Browser
 
   def list_objects
     return unless @s3_client && @current_bucket
-    
+
     delimiter = "/"
     response = @s3_client.list_objects_v2(
       bucket: @current_bucket,
       prefix: @current_prefix,
       delimiter: delimiter
     )
-    
+
     @objects = []
-    
+
     # Add common prefixes (directories)
     response.common_prefixes&.each do |prefix|
       @objects << OpenStruct.new(
@@ -937,13 +1037,13 @@ class S3Browser
         last_modified: nil
       )
     end
-    
+
     # Add actual objects
     response.contents&.each do |obj|
       next if obj.key == @current_prefix  # Skip the prefix itself
       @objects << obj
     end
-    
+
     # Sort: directories first, then by name
     @objects.sort_by! do |obj|
       [obj.key.end_with?("/") ? 0 : 1, obj.key.downcase]
@@ -955,23 +1055,23 @@ class S3Browser
 
   def download_current
     start_idx = @current_prefix.empty? && !@objects.any? { |obj| obj.key.include?("/") } ? 0 : 1
-    
+
     return if @selected_index == 0 && start_idx == 1
-    
+
     obj_idx = @selected_index - start_idx
     obj = @objects[obj_idx]
     return unless obj
     return if obj.key.end_with?("/")
-    
+
     download_file(obj.key)
   end
 
   def download_file(key)
     return unless @s3_client && @current_bucket
-    
+
     filename = File.basename(key)
     download_path = File.join(DOWNLOADS_PATH, filename)
-    
+
     # Handle duplicates
     counter = 1
     original_path = download_path
@@ -981,7 +1081,7 @@ class S3Browser
       download_path = File.join(DOWNLOADS_PATH, "#{base}_#{counter}#{ext}")
       counter += 1
     end
-    
+
     begin
       @s3_client.get_object(
         response_target: download_path,
@@ -1001,16 +1101,16 @@ class S3Browser
 
   def format_size(bytes)
     return "-" if bytes.nil? || bytes == 0
-    
+
     units = ["B", "KB", "MB", "GB", "TB"]
     idx = 0
     size = bytes.to_f
-    
+
     while size >= 1024 && idx < units.length - 1
       size /= 1024
       idx += 1
     end
-    
+
     if idx == 0
       "#{size.to_i} #{units[idx]}"
     else
