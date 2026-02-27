@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name = "betters3tui"
-  spec.version = "0.2.2"
+  spec.version = "0.2.3"
   spec.authors = ["Adi Purnama"]
   spec.email = ["adi@adipurnm.com"]
 
