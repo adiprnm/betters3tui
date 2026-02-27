@@ -26,7 +26,7 @@ class S3Browser
     @current_prefix = ""
     @selected_index = 0
     @scroll_offset = 0
-    @mode = :profile_select  # :profile_select, :bucket_select, :object_list, :add_profile, :edit_profile
+    @mode = :profile_select  # :profile_select, :bucket_select, :object_list, :add_profile, :edit_profile, :sort_menu
 
     # Profile creation/edit state
     @new_profile = {}
@@ -50,6 +50,18 @@ class S3Browser
     @search_query = String.new
     @search_results = []
     @search_cursor = 0
+
+    # Sort state
+    @sort_by = :name
+    @sort_direction = :asc
+
+    # Sort menu state
+    @sort_menu_options = [
+      { key: 'n', label: 'Name', value: :name },
+      { key: 's', label: 'Size', value: :size },
+      { key: 'd', label: 'Date', value: :date }
+    ]
+    @sort_menu_index = 0
   end
 
   def run
@@ -113,6 +125,14 @@ class S3Browser
       end
     end
 
+    # Show sort indicator when in object list mode
+    if @mode == :object_list || @mode == :sort_menu
+      screen.header.add_line do |line|
+        dir_indicator = @sort_direction == :asc ? "▲" : "▼"
+        line.right.write_dim("Sort: #{@sort_by} #{dir_indicator}")
+      end
+    end
+
     # Search input line when in search mode
     if @search_mode
       screen.header.add_line do |line|
@@ -140,6 +160,8 @@ class S3Browser
         render_bucket_list(screen)
       when :object_list
         render_object_list(screen)
+      when :sort_menu
+        render_sort_menu(screen)
       end
     end
 
@@ -389,6 +411,34 @@ class S3Browser
     end
   end
 
+  def render_sort_menu(screen)
+    screen.body.add_line do |line|
+      line.write.write_highlight("Sort by:")
+    end
+    screen.body.add_line
+
+    @sort_menu_options.each_with_index do |option, idx|
+      is_current = idx == @selected_index
+      is_selected = @sort_by == option[:value]
+
+      screen.body.add_line(
+        background: is_current ? Tui::Palette::SELECTED_BG : nil
+      ) do |line|
+        prefix = is_current ? "→ " : "  "
+        indicator = is_selected ? " ● " : " ○ "
+        dir_indicator = is_selected ? (@sort_direction == :asc ? "↑" : "↓") : ""
+
+        line.write << prefix << indicator << option[:label]
+        line.right.write_dim(dir_indicator) if is_selected
+      end
+    end
+
+    screen.body.add_line
+    screen.body.add_line do |line|
+      line.write.write_dim("↑↓ navigate  Enter select  r reverse  Esc cancel")
+    end
+  end
+
   def footer_text
     if @search_mode
       "↑↓ navigate  Enter select  Esc/Ctrl-c exit search"
@@ -403,7 +453,9 @@ class S3Browser
       when :bucket_select
         "↑↓/jk navigate  / search  Enter open  Esc/⌫ back  q quit"
       when :object_list
-        "↑↓/jk navigate  / search  Enter open/download  Esc/⌫ back  d download  q quit"
+        "↑↓/jk navigate  / search  s sort  Enter open/download  Esc/⌫ back  d download  q quit"
+      when :sort_menu
+        "↑↓ navigate  Enter select  r reverse  Esc cancel"
       end
     end
   end
@@ -418,6 +470,8 @@ class S3Browser
     when :object_list
       has_parent = !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
       @objects.length + (has_parent ? 1 : 0)  # +1 for ".."
+    when :sort_menu
+      @sort_menu_options.length
     else
       0
     end
@@ -574,6 +628,26 @@ class S3Browser
         handle_profile_input(char)
       else
         raise Interrupt
+      end
+    when "s", "S"
+      if @mode == :object_list
+        enter_sort_menu
+      elsif @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      end
+    when "r", "R"
+      if @mode == :sort_menu
+        @sort_direction = @sort_direction == :asc ? :desc : :asc
+      elsif @mode == :add_profile || @mode == :edit_profile
+        handle_profile_input(char)
+      end
+    when " "
+      if @mode == :sort_menu
+        # Select sort column without leaving menu
+        selected_option = @sort_menu_options[@selected_index]
+        @sort_by = selected_option[:value]
+        sort_objects!
+        show_message("Sorted by: #{@sort_by} (#{@sort_direction})")
       end
     else
       if (@mode == :add_profile || @mode == :edit_profile) && char =~ /[[:print:]]/
@@ -785,6 +859,53 @@ class S3Browser
     @scroll_offset = 0
   end
 
+  def enter_sort_menu
+    @mode = :sort_menu
+    @selected_index = @sort_menu_options.index { |opt| opt[:value] == @sort_by } || 0
+    @scroll_offset = 0
+  end
+
+  def select_sort_option
+    selected_option = @sort_menu_options[@selected_index]
+    @sort_by = selected_option[:value]
+    sort_objects!
+    @mode = :object_list
+    @selected_index = 0
+    @scroll_offset = 0
+    show_message("Sorted by: #{@sort_by} (#{@sort_direction})")
+  end
+
+  def sort_objects!
+    # Sort: directories always first, then by selected criteria
+    @objects.sort_by! do |obj|
+      is_dir = obj.key.end_with?("/")
+      dir_key = is_dir ? 0 : 1
+
+      sort_key = case @sort_by
+      when :name
+        obj.key.downcase
+      when :size
+        obj.size || 0
+      when :date
+        obj.last_modified || Time.at(0)
+      end
+
+      [dir_key, sort_key]
+    end
+
+    # Reverse if descending (but keep directories first)
+    if @sort_direction == :desc
+      # Separate directories and files
+      dirs = @objects.select { |obj| obj.key.end_with?("/") }
+      files = @objects.reject { |obj| obj.key.end_with?("/") }
+
+      # Reverse only the files based on sort criteria
+      files.reverse!
+
+      @objects = dirs + files
+    end
+  end
+
   def select_search_result
     return unless @search_results[@selected_index]
 
@@ -843,6 +964,8 @@ class S3Browser
         max = @objects.length - 1
         max += 1 if !@current_prefix.empty? || @objects.any? { |obj| obj.key.include?("/") }
         max
+      when :sort_menu
+        @sort_menu_options.length - 1
       else
         return  # Don't move selection in other modes (add_profile, edit_profile)
       end
@@ -891,6 +1014,7 @@ class S3Browser
     # Count header lines that will be rendered
     header_lines = 1  # Title line
     header_lines += 1 if @current_profile && @current_bucket  # Bucket info
+    header_lines += 1 if @mode == :object_list || @mode == :sort_menu  # Sort indicator
     header_lines += 1 if @search_mode  # Search input
     header_lines += 1  # Divider
 
@@ -938,6 +1062,8 @@ class S3Browser
       list_objects
     when :object_list
       handle_object_select
+    when :sort_menu
+      select_sort_option
     end
   end
 
@@ -992,6 +1118,11 @@ class S3Browser
       @mode = :profile_select
       @selected_index = 0
       @scroll_offset = 0
+    when :sort_menu
+      @mode = :object_list
+      @selected_index = 0
+      @scroll_offset = 0
+      return
     when :object_list
       if @current_prefix.empty?
         @current_bucket = nil
@@ -1067,10 +1198,8 @@ class S3Browser
       @objects << obj
     end
 
-    # Sort: directories first, then by name
-    @objects.sort_by! do |obj|
-      [obj.key.end_with?("/") ? 0 : 1, obj.key.downcase]
-    end
+    # Sort: directories first, then by selected criteria
+    sort_objects!
   rescue => e
     show_message("Error listing objects: #{e.message}")
     @objects = []
