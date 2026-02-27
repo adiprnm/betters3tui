@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 require "json"
 require "aws-sdk-s3"
