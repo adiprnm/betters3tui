@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.8] - 2026-02-28
+
+### Fixed
+- **Windows navigation support** - Fixed keyboard navigation not working on Windows by implementing Windows Console API support
+- Added cross-platform terminal setup/cleanup (`setup_terminal`/`cleanup_terminal`)
+- Implemented Windows-specific `read_char` method for proper key input handling
+- Console mode is now properly saved and restored on Windows platforms
+
 ## [0.2.7] - 2026-02-28
 
 ### Fixed
@@ -39,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - File download capability
 - Interactive keyboard navigation
 
+[0.2.8]: https://github.com/adiprnm/betters3tui/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/adiprnm/betters3tui/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/adiprnm/betters3tui/compare/v0.2.5...v0.2.6
 [0.1.1]: https://github.com/adiprnm/betters3tui/compare/v0.1.0...v0.1.1
