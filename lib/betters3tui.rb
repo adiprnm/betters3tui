@@ -105,6 +105,7 @@ class S3Browser
   def setup_terminal
     if windows?
       require 'io/console'
+      require 'win32api'
       @console_mode = nil
       begin
         # Get the Windows console handle and save current mode
