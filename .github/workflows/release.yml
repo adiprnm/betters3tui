@@ -54,18 +54,26 @@ jobs:
   publish-gem:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # Required to push tags
       id-token: write  # Required for OIDC
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4'
           bundler-cache: true
+
+      - name: Configure git
+        run: |
+          git config --global user.email "$(git log -1 --pretty=format:'%ae')"
+          git config --global user.name "$(git log -1 --pretty=format:'%an')"
 
       - name: Publish to RubyGems
         uses: rubygems/release-gem@v1
