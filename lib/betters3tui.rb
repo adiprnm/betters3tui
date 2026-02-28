@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-VERSION = "0.2.7"
+VERSION = "0.2.8"
 
 require "json"
 require "aws-sdk-s3"
@@ -103,8 +103,38 @@ class S3Browser
   end
 
   def setup_terminal
-    @original_stty = `stty -g 2>/dev/null`.chomp
-    system("stty -echo -icanon raw 2>/dev/null")
+    if windows?
+      require 'io/console'
+      @console_mode = nil
+      begin
+        # Get the Windows console handle and save current mode
+        kernel32 = Win32API.new('kernel32', 'GetStdHandle', ['L'], 'L')
+        @stdout_handle = kernel32.call(-11)  # STD_OUTPUT_HANDLE = -11
+        @stdin_handle = kernel32.call(-10)   # STD_INPUT_HANDLE = -10
+
+        # Save and set console input mode
+        get_mode = Win32API.new('kernel32', 'GetConsoleMode', ['L', 'P'], 'I')
+        set_mode = Win32API.new('kernel32', 'SetConsoleMode', ['L', 'L'], 'I')
+
+        mode_buf = [0].pack('L')
+        get_mode.call(@stdin_handle, mode_buf)
+        @original_console_mode = mode_buf.unpack1('L')
+
+        # Enable window input, disable line input and echo
+        new_mode = 0x0080 | 0x0008  # ENABLE_WINDOW_INPUT | ENABLE_PROCESSED_INPUT
+        set_mode.call(@stdin_handle, new_mode)
+
+        # Set output mode for virtual terminal processing
+        get_mode.call(@stdout_handle, mode_buf)
+        @original_stdout_mode = mode_buf.unpack1('L')
+        set_mode.call(@stdout_handle, @original_stdout_mode | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+      rescue LoadError
+        # Fall back to basic mode
+      end
+    else
+      @original_stty = `stty -g 2>/dev/null`.chomp
+      system("stty -echo -icanon raw 2>/dev/null")
+    end
     print Tui::ANSI::ALT_SCREEN_ON
     print Tui::ANSI::HIDE
     $stdout.flush
@@ -114,8 +144,27 @@ class S3Browser
     print Tui::ANSI::ALT_SCREEN_OFF
     print Tui::ANSI::SHOW
     print Tui::ANSI::RESET
-    system("stty #{@original_stty} 2>/dev/null") if @original_stty && !@original_stty.empty?
+    if windows?
+      begin
+        if @stdin_handle && @original_console_mode
+          set_mode = Win32API.new('kernel32', 'SetConsoleMode', ['L', 'L'], 'I')
+          set_mode.call(@stdin_handle, @original_console_mode)
+        end
+        if @stdout_handle && @original_stdout_mode
+          set_mode = Win32API.new('kernel32', 'SetConsoleMode', ['L', 'L'], 'I')
+          set_mode.call(@stdout_handle, @original_stdout_mode)
+        end
+      rescue
+        # Ignore errors during cleanup
+      end
+    else
+      system("stty #{@original_stty} 2>/dev/null") if @original_stty && !@original_stty.empty?
+    end
     $stdout.flush
+  end
+
+  def windows?
+    RUBY_PLATFORM =~ /mswin|mingw|cygwin/
   end
 
   def render
@@ -508,7 +557,7 @@ class S3Browser
   end
 
   def handle_input
-    char = $stdin.getc
+    char = read_char
     return unless char
 
     if @delete_confirm_mode
@@ -520,6 +569,25 @@ class S3Browser
       handle_search_input(char)
     else
       handle_normal_input(char)
+    end
+  end
+
+  def read_char
+    if windows?
+      require 'io/console'
+      # On Windows, use console API for proper key reading
+      # Try to get a single character without echo
+      begin
+        # Use IO#raw if available (Ruby 2.4+)
+        $stdin.raw do
+          return $stdin.getch
+        end
+      rescue
+        # Fallback for older Ruby versions
+        return $stdin.getch
+      end
+    else
+      $stdin.getc
     end
   end
 
