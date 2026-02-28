@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2026-02-28
+
+### Fixed
+- **Win32API dependency** - Added missing `win32api` gem requirement and `require 'win32api'` statement for Windows terminal support
+
 ## [0.2.8] - 2026-02-28
 
 ### Fixed
@@ -47,6 +52,7 @@ All notable changes to this project will be documented in this file.
 - File download capability
 - Interactive keyboard navigation
 
+[0.2.9]: https://github.com/adiprnm/betters3tui/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/adiprnm/betters3tui/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/adiprnm/betters3tui/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/adiprnm/betters3tui/compare/v0.2.5...v0.2.6
